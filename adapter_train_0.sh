@@ -1,0 +1,2 @@
+CUDA_VISIBLE_DEVICES=0 python CLIP_Office_Home.py --category "Art" --model ViT_B_32 | tee Art.txt
+CUDA_VISIBLE_DEVICES=0 python CLIP_Office_Home.py --category "Clipart" --model ViT_B_32 | tee Clipart.txt

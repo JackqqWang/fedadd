@@ -1,0 +1,2 @@
+CUDA_VISIBLE_DEVICES=1 python CLIP_Office_Home.py --category "Product" --model ViT_B_32 | tee Product.txt
+CUDA_VISIBLE_DEVICES=1 python CLIP_Office_Home.py --category "Real World" --model ViT_B_32 | tee Real_World.txt

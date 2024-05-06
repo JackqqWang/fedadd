@@ -1,0 +1,1 @@
+python FedAdapter.py --communication_rounds 15 --epoch 15 --adp_init_epoch 20 --KD_epoch 5 --interact_epoch 3 --server_FT 5 | tee fusion_adpt_synthe.txt
