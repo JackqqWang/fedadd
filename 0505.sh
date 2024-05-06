@@ -10,3 +10,5 @@ CUDA_VISIBLE_DEVICES=0 python Centralized_training.py --dataset imageclef_da --m
 
 # # centralized training on syn + real data
 # CUDA_VISIBLE_DEVICES=0 python Centralized_training.py --dataset officehome --mode train_syn_real --centralized_epochs 20 --centralized_lr 1e-4 | tee results/central_officehome_train_syn_real.txt
+
+# test git push
