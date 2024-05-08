@@ -138,7 +138,7 @@ class ClipModelatFed(object):
         # print(f'total # of {category} server test data (real): {len(self.testsets[-1])}')
         # print(f'total # of {category} server train data (syn): {len(self.trainsets[-1])}')
 
-    def init_adapter(self, category):
+    def init_adapter(self):
         
         # data_loader = DataLoader(self.testsets[category], batch_size=self.args.batch_size, shuffle=False)
         # for images, _ in data_loader:
@@ -160,6 +160,11 @@ class ClipModelatFed(object):
 
         self.adapters_wights = Adapter_Interaction(self.output_dim, len(self.class_names))
         self.adapters_wights.to(self.device)
+
+    def init_MLP(self):
+        self.MLP = nn.Sequential(nn.Linear(self.output_dim, 1), nn.ReLU())
+        self.MLP.to(self.device)
+        
 
     def train(self, adapter, train_loader, optimizer, classes):
 

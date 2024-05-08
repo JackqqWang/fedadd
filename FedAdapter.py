@@ -2,13 +2,14 @@ import torch
 from torch.utils.data import DataLoader
 import random
 import numpy as np
+import pandas as pd
 import os
 from models.CLIP_adapter import ClipModelatFed
 from tqdm import tqdm
 import copy as cp
 from utils_FedAdapter import arg_parser, Split_office_home_dataset, distribute_local_data
 from utils_FedAdapter import knowledge_distillation_loss
-from utils_FedAdapter import set_seed
+from utils_FedAdapter import set_seed, cos_sim_tensor
 from utils_FedAdapter import centralized_train, centralized_zero_shot
 from Client import Client
 from options_fedadapter import *
@@ -29,7 +30,7 @@ def main():
 
     categories = dataset_to_categories[args.dataset]
     
-    # init CLIP 
+    # create CLIP on server
     CLIP_adapter = ClipModelatFed(args, adp=True)
 
     device = args.device
@@ -42,7 +43,7 @@ def main():
     print('create adpaters for each domain and insert server data')
     for i in range(len(categories)):
         CLIP_adapter.insert_datasets(server_data[i], classes[i], categories[i])
-        CLIP_adapter.init_adapter(i)
+        CLIP_adapter.init_adapter()
     
     # distribute local data to clients
     print('distribute local data to clients')
@@ -50,7 +51,7 @@ def main():
     print(f'category_to_clients: {category_to_clients}')
     print(f'client_to_categories: {client_to_categories}')
 
-    # init clients
+    # create clients
     print('create clients'), 
     clients = []
     for i in range(args.num_clients):
@@ -60,29 +61,113 @@ def main():
         clients.append(Client(client_datasets[i], num_classes, args))
 
     # server side:
-    # 0.1 initialize adapters for each category (based on server data)
-    print("Initialize adapters for each category")
+    '''
+    # 0.1 initialize adapters for each domain using on server syn data
+    print("Initialize adapters for each domain")
     for i in range(len(categories)):
         CLIP_adapter.train_adapter(i, categories[i], args.adp_init_epoch, init=True)
+    '''
 
-    # 0.2 initialize weights for adapters
-    CLIP_adapter.init_adapters_weights()
+    # # 0.2 initialize weights for adapters
+    # CLIP_adapter.init_adapters_weights()
+    # 0.2 init MLP for processing logits
+    CLIP_adapter.init_MLP()
 
-    # server-client communication
+    # FL: server-client communication
     for epoch in range(args.communication_rounds):
 
         # client side:
-        # 1.train local image classifier (based on local data)
+        # C.1 train local image classifier using local real data
         print("-------Communication round {}--------".format(epoch))
         print("Start local training...")
 
         for i in range(len(clients)):
             
+            '''
             print(f"Train local client {i}:")
             clients[i].train_classifier()
-
+            '''
 
         print("Finish local training.")
+
+        # C.2 prototype representation calculation
+        print("Calculate prototype representation (real client data)")
+
+        # register forward hook in each client model -> obtain embedding in pernultimate layer
+        activations, hooks = {}, []
+        def get_pernultimate_activation(module, input, output):
+            activations['pernultimate'] = input[0]
+        
+        for i in range(len(clients)):
+            hooks.append(clients[i].image_classifier.head.register_forward_hook(get_pernultimate_activation))
+
+        # calculate prototype representation
+        prototype_representations = {(i, y): [] for i in range(len(categories)) for y in range(len(classes[i]))}
+        for i in range(len(categories)):
+            # for y in range(len(classes[i])):
+            print(len(clients[i].train_set))
+                
+            for c in category_to_clients[i]:
+                clients[c].image_classifier.eval()
+                
+                train_loader = DataLoader(clients[c].train_set, batch_size=args.batch_size, shuffle=False)
+                
+                for images, labels in train_loader:
+                    images = images.to(device)
+                    with torch.no_grad():
+                        clients[c].image_classifier(images)
+                    
+                    A = activations['pernultimate'].detach().cpu()
+                    for y in range(len(classes[i])):
+                        # print('domain i ', i, 'class j ', j, 'size ', A[labels == j].shape)
+                        prototype_representations[(i, y)].append(A[labels == y])
+
+                    # prototype_representations[(i, y)].append(activations['pernultimate'].detach().cpu())
+
+        prototype = []
+        for i in range(len(categories)):
+            prototype_i = []
+            for y in range(len(classes[i])):
+                prototype_representations[(i, y)] = torch.cat(prototype_representations[(i, y)], dim=0)
+                prototype_representations[(i, y)] = torch.sum(prototype_representations[(i, y)], dim=0)/prototype_representations[(i, y)].shape[0]
+
+                prototype_i.append(prototype_representations[(i, y)])
+            
+            prototype_i = torch.stack(prototype_i, dim=0)
+            prototype.append(prototype_i)
+        prototype = torch.stack(prototype, dim=0)
+
+        # C.3 Syn Data Quality Estimation
+        syn_data_quality = [[] for i in range(len(categories))]
+        for i in range(len(categories)):
+            train_loader = DataLoader(CLIP_adapter.trainsets[i], batch_size=args.batch_size, shuffle=False)
+            
+            for images, labels in train_loader:
+                images = images.to(device)
+                P = prototype[i][labels]
+
+                with torch.no_grad():
+                    quality_batch = []
+                    for c in category_to_clients[i]:
+                        clients[c].image_classifier(images)
+                        A = activations['pernultimate'].detach().cpu()
+                    
+                        quality_batch.append(cos_sim_tensor(A, P))
+                    
+                    quality_batch = torch.stack(quality_batch, dim=0)
+                    quality_batch = torch.mean(quality_batch, dim=0)
+                    syn_data_quality[i].append(quality_batch)
+            
+            syn_data_quality[i] = torch.cat(syn_data_quality[i], dim=0)
+            print(i, syn_data_quality[i])
+            
+                    
+
+
+        # remove all the hooks
+        for hook in hooks:
+            hook.remove()
+
 
         print("Start server update...")
 

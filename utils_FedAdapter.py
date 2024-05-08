@@ -21,6 +21,31 @@ def set_seed(seed_value=42):
     os.environ['PYTHONHASHSEED'] = str(seed_value)  # Python hash build-in
 
 
+def cos_sim(A, b):
+
+    # Normalize B to have unit norm
+    b_norm = b / np.linalg.norm(b)
+
+    # Normalize each row in A
+    A_norm = A / np.linalg.norm(A, axis=1, keepdims=True)
+
+    # Compute cosine similarity
+    cos_similarity = np.dot(A_norm, b_norm)
+
+    return cos_similarity
+
+
+def cos_sim_tensor(A, B):
+
+    # Normalize each row to have unit norm
+    A_norm = A / A.norm(dim=1, keepdim=True)
+    B_norm = B / B.norm(dim=1, keepdim=True)
+
+    # Compute the dot product for corresponding rows
+    cos_similarity = (A_norm * B_norm).sum(dim=1)
+
+    return cos_similarity
+
 
 def get_office_home_dataset(args, preprocess):
 
