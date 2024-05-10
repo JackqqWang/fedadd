@@ -174,6 +174,18 @@ def distribute_local_data(local_data, num_clients, num_categories, args):
     return client_datasets, dict(category_to_clients), client_to_categories
 
 
+def mutual_KD_loss(output1, output2, temperature=1):
+    
+    # Soften the outputs
+    soft_logits1 = log_softmax(output1 / temperature, dim=1)
+    soft_logits2 = log_softmax(output2 / temperature, dim=1)
+
+    # Compute the mutual information loss
+    mutual_info_loss = (kl_div(soft_logits1, soft_logits2, reduction='batchmean') + kl_div(soft_logits2, soft_logits1, reduction='batchmean')) * (temperature ** 2)
+
+    return mutual_info_loss
+    
+
 def knowledge_distillation_loss(output_student, output_teacher, labels, temperature=1, alpha=0.5):
 
     # Soften the outputs
@@ -240,6 +252,48 @@ def centralized_zero_shot(CLIP_adapter, i, args):
     return accuracy
 
 
+def centralized_train_old(CLIP_adapter, local_data, i, category, args):
+
+    # one domain one adapter
+
+    if 'real' in args.mode:
+        # mix server syn data with local data
+        train_set = ConcatDataset([local_data[i], CLIP_adapter.trainsets[i]])
+    else:
+        train_set = CLIP_adapter.trainsets[i]
+
+    print(f'train size: {len(train_set)}')
+
+    train_loader = DataLoader(train_set, batch_size=args.batch_size, shuffle=True)
+    test_loader = DataLoader(CLIP_adapter.testsets[i], batch_size=args.batch_size, shuffle=False)
+    optimizer = torch.optim.Adam(CLIP_adapter.adapters[i].parameters(), lr=args.centralized_lr)
+
+    model_path = os.path.join(args.data_dir, 'centralized_training', args.mode, f'{args.dataset}_fake_{args.server_syn_ver}')
+
+    if not os.path.exists(model_path):
+        os.makedirs(model_path)
+
+    model_path = os.path.join(model_path, f'adapter_epochs[{args.centralized_epochs}]_category[{category}].pth')
+
+    if not os.path.exists(model_path):
+
+        print(f"train adapter in domain {i}")
+        for epoch in range(args.centralized_epochs):
+            print(f"Epoch {epoch}:")
+            CLIP_adapter.train(CLIP_adapter.adapters[i], train_loader, optimizer, CLIP_adapter.class_names[i])
+            CLIP_adapter.test(CLIP_adapter.adapters[i], test_loader, CLIP_adapter.class_names[i])
+
+        print(f"Save adapter in domain {i} to {model_path}")
+        torch.save(CLIP_adapter.adapters[i].state_dict(), model_path)
+    
+    else:
+        print(f"Load adapter in domain {i} from {model_path}")
+        CLIP_adapter.adapters[i].load_state_dict(torch.load(model_path))
+        CLIP_adapter.test(CLIP_adapter.adapters[i], test_loader, CLIP_adapter.class_names[i])
+
+    return
+
+
 def centralized_train(CLIP_adapter, local_data, i, category, args):
 
     if 'real' in args.mode:
@@ -278,6 +332,8 @@ def centralized_train(CLIP_adapter, local_data, i, category, args):
         CLIP_adapter.test(CLIP_adapter.adapters[i], test_loader, CLIP_adapter.class_names[i])
 
     return
+
+
 
 
 '''
