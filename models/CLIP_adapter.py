@@ -9,6 +9,7 @@ from torch.utils.data import DataLoader, random_split
 from tqdm import tqdm
 from itertools import chain
 from utils_FedAdapter import get_synthetic_dataset_server
+from torch.utils.data import Dataset, DataLoader
 
 
 def get_image_features(image, model, cpreprocess, device='cuda', need_preprocess=False):
@@ -70,6 +71,25 @@ class Adapter_Interaction(nn.Module):
         return interaction
 
 
+class QualityDataset(Dataset):
+    def __init__(self, image_folder_dataset, quality_scores):
+        """
+        image_folder_dataset: Dataset object from ImageFolder containing the images and labels.
+        quality_scores: A tensor containing the quality scores for each image, indexed correspondingly.
+        """
+        assert len(image_folder_dataset) == quality_scores.size(0), "The number of images and quality scores must match"
+        self.image_folder_dataset = image_folder_dataset
+        self.quality_scores = quality_scores
+
+    def __len__(self):
+        return len(self.image_folder_dataset)
+
+    def __getitem__(self, idx):
+        image, label = self.image_folder_dataset[idx]
+        quality_score = self.quality_scores[idx]
+        return (image, label, quality_score)
+
+
 class ClipModelatFed(object):
 
     # server side in FedAdapter
@@ -84,34 +104,12 @@ class ClipModelatFed(object):
         self.adapters = []
         self.trainsets = []
         self.testsets = []
+        self.testsets_out = []
         self.class_names = []
+        self.class_names_out = []
         self.best_acc = []
         self.embed_dim = None
         self.output_dim = None
-
-    def insert_datasets_old(self, dataset, classes, category):
-
-        test_size = int(self.args.test_ratio * len(dataset))
-        train_size = len(dataset) - test_size
-        train, test = random_split(dataset, [train_size, test_size])
-
-        if self.args.server_syn_size > 0:
-            train = get_synthetic_dataset_server(self.args, self.clip_preprocess, category)
-        
-        self.trainsets.append(train)
-        self.testsets.append(test)
-        # self.class_names.append(train.dataset.classes)
-        self.class_names.append(classes)
-
-        if self.embed_dim is None:
-            self.output_dim = len(classes)
-
-            data_loader = DataLoader(self.testsets[0], batch_size=self.args.batch_size, shuffle=False)
-            for images, _ in data_loader:
-                images = images.to(self.device)
-                images_features = self.clip_model.encode_image(images)
-                self.embed_dim = images_features.shape[1]
-                break
     
     def insert_datasets(self, real_dataset, classes, category):
 
@@ -121,7 +119,7 @@ class ClipModelatFed(object):
         # synthetic dataset for training adapters on server
         assert self.args.server_syn_size > 0, "server syn data cannot be 0"         
         train = get_synthetic_dataset_server(self.args, self.clip_preprocess, category)
-        self.trainsets.append(train)
+        self.trainsets.append(QualityDataset(train, torch.ones(len(train))))
 
         self.class_names.append(classes)
 
@@ -138,6 +136,12 @@ class ClipModelatFed(object):
         # print(f'total # of {category} server test data (real): {len(self.testsets[-1])}')
         # print(f'total # of {category} server train data (syn): {len(self.trainsets[-1])}')
 
+    def insert_out_testsets(self, real_dataset, classes):
+        # real_dataset for testing on server
+        self.testsets_out.append(real_dataset)
+        self.class_names_out.append(classes)
+
+
     def init_adapter(self):
         
         # data_loader = DataLoader(self.testsets[category], batch_size=self.args.batch_size, shuffle=False)
@@ -153,6 +157,7 @@ class ClipModelatFed(object):
         self.adapters.append(img_adap)
         self.best_acc.append([float('-inf'), -1])
 
+    '''
     def init_adapters_weights(self):
         # self.adapters_wights  = nn.Sequential(nn.Linear(self.output_dim*len(self.class_names), self.output_dim), nn.ReLU())
         # self.adapters_wights  = nn.Sequential(nn.Linear(self.output_dim, len(self.class_names)), nn.ReLU())
@@ -160,7 +165,8 @@ class ClipModelatFed(object):
 
         self.adapters_wights = Adapter_Interaction(self.output_dim, len(self.class_names))
         self.adapters_wights.to(self.device)
-
+    '''
+    
     def init_MLP(self):
         self.MLP = nn.Sequential(nn.Linear(self.output_dim, 1), nn.ReLU())
         self.MLP.to(self.device)
@@ -168,12 +174,15 @@ class ClipModelatFed(object):
 
     def train(self, adapter, train_loader, optimizer, classes):
 
+        # training on server uses syn datasets with quality scores
+        assert type(train_loader.dataset) == QualityDataset, "The dataset used on server must be a QualityDataset"
+
         adapter.train()
 
         loss_img = torch.nn.CrossEntropyLoss()
         loss_txt = torch.nn.CrossEntropyLoss()
 
-        for images, labels in tqdm(train_loader):
+        for images, labels, _ in tqdm(train_loader):
             # Move the images and labels to the same device as the model
             images = images.to(self.device)
             labels = labels.to(self.device)
@@ -296,28 +305,79 @@ class ClipModelatFed(object):
             self.test(self.adapters[i], test_loader, self.class_names[i])
             
 
-    def inference_all_adapters(self, e):
-        for i in range(len(self.adapters)):
+    def inference_one2one(self, e, categories):
+        for i in range(len(self.testsets)):
             test_loader = DataLoader(self.testsets[i], batch_size=self.args.batch_size, shuffle=False)
             test_acc_i = self.test(self.adapters[i], test_loader, self.class_names[i])
-            print(f"After server update, we test adapter in domain {i} at round {e} has accuracy: {test_acc_i}")
+            print(f"in-domain {categories[i]} at round {e} has accuracy: {test_acc_i}")
 
-            if test_acc_i > self.best_acc[i][0]:
-                print("Start saving the best adapter for category...")
-                self.best_acc[i] = [test_acc_i, e]
-                torch.save(self.adapters[i].state_dict(), f'Adapters/adapter_domain[{i}]_round[{e}].pth')
-                print("finish saving the best adapter for category.")
+            # if test_acc_i > self.best_acc[i][0]:
+            #     print("Start saving the best adapter for category...")
+            #     self.best_acc[i] = [test_acc_i, e]
+                # torch.save(self.adapters[i].state_dict(), f'Adapters/adapter_domain[{i}]_round[{e}].pth')
+                # print("finish saving the best adapter for category.")
+
+    def inference_one2all(self, e, categories, categories_out, in_domain=False):
+        self.MLP.eval()
+        if in_domain:
+            test_sets = self.testsets
+        else:
+            test_sets = self.testsets_out
+
+        # for i in range(len(self.testsets_out)):
+        for i, testset in enumerate(test_sets):
+            test_loader = DataLoader(testset, batch_size=self.args.batch_size, shuffle=False)
+
+            total_correct = 0
+            total_images = 0
+            for images, labels in test_loader:
+                images = images.to(self.device)
+                labels = labels.to(self.device)
+
+                # calculate attension score
+                att_score = []
+                server_logits_all = []
+                for j in range(len(categories)):
+                    with torch.no_grad():
+                        server_logits_j = self.CLIP_logtis(j, False, images, in_domain)  
+                        server_logits_all.append(server_logits_j)
+                        att_score.append(self.MLP(server_logits_j))
+                
+                server_logits_all = torch.stack(server_logits_all, dim=0)
+                att_score = torch.stack(att_score, dim=0)
+                att_score = torch.softmax(att_score, dim=0)
+
+                combined_logits = torch.sum(server_logits_all * att_score, dim=0)
+
+                predictions = combined_logits.argmax(dim=1)  # logits per image
+
+                # Update the total correct predictions and total images processed
+                total_correct += (predictions == labels).sum().item()
+                total_images += images.size(0)
+
+            # Calculate the accuracy
+            accuracy = total_correct / total_images
+
+            if in_domain:
+                print(f"in-domain {categories[i]} at round {e} has accuracy: {accuracy}")
+            else:
+                print(f"out-domain {categories_out[i]} at round {e} has accuracy: {accuracy}")
         
-    
-    def CLIP_logtis(self, i, student, images):
+    def CLIP_logtis(self, i, student, images, in_domain=True):
 
         if student:
             self.adapters[i].train()
         else:
             self.adapters[i].eval()
 
+        # if in_domain:
+        #     class_names = self.class_names[i]
+        # else:
+        #     class_names = self.class_names_out[i]
+        class_names = self.class_names[i]
+
         # prompts
-        text_descriptions = [f"This is a photo of a {class_name}" for class_name in self.class_names[i]]
+        text_descriptions = [f"This is a photo of a {class_name}" for class_name in class_names]
         text_tokens = clip.tokenize(text_descriptions).to(self.device)
 
         # Encode images 
@@ -339,6 +399,7 @@ class ClipModelatFed(object):
         return similarity
 
 
+    '''
     def train_adapters_and_weights(self, switch):
 
         # switch is True, update adapters and fix weights
@@ -383,8 +444,9 @@ class ClipModelatFed(object):
             optimizer.zero_grad()
             loss.backward()
             optimizer.step()
+    '''
 
-
+    '''
     def inference_weighted_adapters(self, e):
         self.adapters_wights.eval()
         for adapter in self.adapters:
@@ -415,6 +477,7 @@ class ClipModelatFed(object):
         for i in range(len(acc)):
             print(f"domain {i} accuracy: {acc[i]}")
         print(f"Total accuracy: {sum(correct)/sum(total)}")
+    '''
 
 '''
 class ClipModelat_old(object):
@@ -471,5 +534,4 @@ class ClipModelat_old(object):
 
     def setselflabel(self, labels):
         self.labels = labels
-
 '''
