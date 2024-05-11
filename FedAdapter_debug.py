@@ -208,7 +208,8 @@ def main():
                 loss_KD = 0
                 for i, (images, labels, qualitys) in enumerate(batch_group):
 
-                    optimizer = torch.optim.Adam([clients[i].image_classifier.parameters()] + [CLIP_adapter.adapters[i].parameters()], lr=args.lr)
+                    parameters = list(clients[i].image_classifier.parameters()) + list(CLIP_adapter.adapters[i].parameters())
+                    optimizer = torch.optim.Adam(parameters, lr=args.lr)
                     # print(counter_debug)
                     # counter_debug += 1
                     # print(images.shape, qualitys.unsqueeze(1).shape)
