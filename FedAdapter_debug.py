@@ -9,7 +9,7 @@ from tqdm import tqdm
 import copy as cp
 from itertools import chain
 from utils_FedAdapter import arg_parser, Split_office_home_dataset, distribute_local_data
-from utils_FedAdapter import mutual_KD_loss
+from utils_FedAdapter import mutual_KD_loss, knowledge_distillation_loss
 from utils_FedAdapter import set_seed, cos_sim_tensor
 from utils_FedAdapter import centralized_train, centralized_zero_shot
 from Client import Client
@@ -18,7 +18,7 @@ from options_fedadapter import *
 dataset_to_categories = {'officehome': ['Art', 'Clipart', 'Product', 'Real_World'],
                          'domainnet': ['clipart', 'infograph', 'painting', 'quickdraw', 'realworld', 'sketch'],
                          'imageclef_da': ['c', 'i', 'p']}
-
+ 
 def main():
 
     args = arg_parser()
@@ -87,6 +87,7 @@ def main():
 
     # FL: server-client communication
     for epoch in range(args.communication_rounds):
+        
 
         # client side:
         # C.1 train local image classifier using local real data
@@ -191,56 +192,145 @@ def main():
             trainloader_iters = [iter(dataloader) for dataloader in train_loaders]
 
             # all_parameters = list(chain(*[adapter.parameters() for adapter in CLIP_adapter.adapters]))
-            # # all_parameters += list(CLIP_adapter.MLP.parameters())
+            # all_parameters += list(CLIP_adapter.MLP.parameters())
             # all_parameters += list(chain(*[client.image_classifier.parameters() for client in clients]))
 
             # # Creating the optimizer
             # optimizer = torch.optim.Adam(all_parameters, lr=args.lr)
 
             # CLIP_adapter.MLP.train()
-            for client in clients:
-                client.image_classifier.train()
+            # for client in clients:
+            #     client.image_classifier.train()
         
             # counter_debug = 0
             for batch_group in zip(*trainloader_iters):
+
+                # mutual KD learning starts here
+                #####################################################################################################
                 
                 # S.1 mutual KD loss
+                for c in range(len(clients)):
+                    clients[c].image_classifier.eval() 
+
+                all_parameters = list(chain(*[adapter.parameters() for adapter in CLIP_adapter.adapters]))
+                all_parameters += list(CLIP_adapter.MLP.parameters())
+                optimizer = torch.optim.Adam(all_parameters, lr=args.lr)
+
+                CLIP_adapter.MLP.train()
+
                 loss_KD = 0
                 for i, (images, labels, qualitys) in enumerate(batch_group):
+                    images = images.to(device)
+                    labels = labels.to(device)
+                    qualitys = qualitys.to(device)
 
-                    parameters = list(clients[i].image_classifier.parameters()) + list(CLIP_adapter.adapters[i].parameters())
-                    optimizer = torch.optim.Adam(parameters, lr=args.lr)
-                    # print(counter_debug)
-                    # counter_debug += 1
-                    # print(images.shape, qualitys.unsqueeze(1).shape)
+                    # 2.1 adapter is student
+                    # print("Adapter is student, update adapters...")    
+                    # for each adapter i
+                    # optimizer = torch.optim.Adam(CLIP_adapter.adapters[i].parameters(), lr=args.lr)
+
+                    # select all clients has the same category
+                    clients_with_domain_i = category_to_clients[i]
+                    image_classifiers_with_domain_i = [cp.deepcopy(clients[c].image_classifier) for c in clients_with_domain_i]
+                    
+                    # teacher_logits = avg(all clients with domain i logits)
+                    teacher_logits = torch.zeros((images.shape[0], len(CLIP_adapter.class_names[i]))).to('cuda')
+                    for img_classifer in image_classifiers_with_domain_i:
+                        img_classifer.eval()
+                        with torch.no_grad():
+                            outputs = img_classifer(images)
+                            teacher_logits += outputs
+
+                    teacher_logits = teacher_logits/len(clients_with_domain_i)
+                    teacher_logits *= qualitys.unsqueeze(1)
+
+                    student_logits = CLIP_adapter.CLIP_logtis(i, True, images)
+
+                    loss_KD += knowledge_distillation_loss(student_logits, teacher_logits, labels, alpha=.5)
+                    # loss = mutual_KD_loss(student_logits, teacher_logits)
+
+                ########################################################################################################
+                # insert interative learning for server
+                ########################################################################################################
+                loss_IL = 0
+                for i, (images, labels, _) in enumerate(batch_group):
                     images = images.to(args.device)
                     labels = labels.to(args.device)
-                    qualitys = qualitys.to(args.device)
 
-                    # S.1.1 server logits
-                    server_logits = CLIP_adapter.CLIP_logtis(i, True, images)  # True -- train()
+                    # S.2.1 calculate attension score
+                    att_score = []
+                    server_logits_all = []
+                    for j in range(len(categories)):
+                        server_logits_j = CLIP_adapter.CLIP_logtis(j, True, images)  
+                        # print(server_logits_j.shape)
+                        server_logits_all.append(server_logits_j)
+                        att_score.append(CLIP_adapter.MLP(server_logits_j))
 
-                    # S.1.2 client logits
-                    client_logits = []
-                    for c in category_to_clients[i]:
-                        # with torch.no_grad():
-                        client_logits.append(clients[c].image_classifier(images))
-                    client_logits = torch.stack(client_logits, dim=0)
-                    client_logits = torch.mean(client_logits, dim=0)
-                    # print(client_logits.shape)
+                        # CE loss -- correct adapter
+                        if i == j: 
+                            loss_IL += CE_loss(server_logits_j, labels)
+                    
+                    server_logits_all = torch.stack(server_logits_all, dim=0)
+                    # print(server_logits_all.shape)
+                    att_score = torch.stack(att_score, dim=0)
+                    # print(att_score.shape)
+                    att_score = torch.softmax(att_score, dim=0)
+                    # print(att_score[:,0,0])
+                    # print(att_score[:,1,0])
+                    # exit()
 
-                    client_logits *= qualitys.unsqueeze(1)
-                    # print(client_logits.shape);exit()
+                    # S.2.2 weighted sum of server logits
+                    combined_logits = torch.sum(server_logits_all * att_score, dim=0)
 
-                    # S.1.3 KD loss for domain i
-                    loss_KD = mutual_KD_loss(client_logits, server_logits, args.temperature)
+                    # CE loss -- combined logits
+                    loss_IL += CE_loss(combined_logits, labels)
 
-                    optimizer.zero_grad()
-                    loss_KD.backward()
-                    optimizer.step()
+                    # S.2.3 regularizaton
+                    loss_IL += args.lam * (att_score - att_score[i]).max(dim=0)[0].sum()
+                
+                print(loss_KD.item(), loss_IL.item())
+                loss = loss_KD + loss_IL
+                optimizer.zero_grad()
+                loss.backward()
+                optimizer.step()
 
-                loss_IL = 0
+
+                CLIP_adapter.MLP.eval()
+                
+                #  mutual KD for clients
+                for c in range(len(clients)):
+                    clients[c].image_classifier.train()
+                optimizer = torch.optim.Adam(list(chain(*[client.image_classifier.parameters() for client in clients])), lr=args.lr)
+
+                loss_KD = 0
+                for i, (images, labels, qualitys) in enumerate(batch_group):
+                    images = images.to(device)
+                    labels = labels.to(device)
+                    qualitys = qualitys.to(device)
+                        
+                    # 2.2 adapter is teacher
+                    # print("Adapter is teacher, update clients...")        
+                    # optimizer = torch.optim.Adam(clients[i].image_classifier.parameters(), lr=args.lr)
+                    # clients[i].image_classifier.train()
+
+                    student_logits = clients[i].image_classifier(images)
+                    student_logits *= qualitys.unsqueeze(1)
+
+                    with torch.no_grad():
+                        teacher_logits = CLIP_adapter.CLIP_logtis(i, False, images)
+
+                    loss_KD += knowledge_distillation_loss(student_logits, teacher_logits, labels, alpha=.5)
+                    # loss = mutual_KD_loss(student_logits, teacher_logits)
+                    
+                optimizer.zero_grad()
+                loss_KD.backward()
+                optimizer.step()
+
+                # mutual KD learning ends here
+                #####################################################################################################
+                
                 '''
+                loss_KD = 0
                 # S.2 Interactive Learning
                 loss_IL = 0
                 for i, (images, labels, _) in enumerate(batch_group):
@@ -277,24 +367,24 @@ def main():
 
                     # S.2.3 regularizaton
                     loss_IL += args.lam * ((att_score - att_score[i]).max(dim=0)[0] + args.eps).clamp(min=0).sum()
-                '''
                 
-                # loss_total = (loss_KD + loss_IL)/len(categories)
-                # optimizer.zero_grad()
-                # loss_total.backward()
-                # optimizer.step()
+                loss_total = (loss_KD + loss_IL)/len(categories)
+                optimizer.zero_grad()
+                loss_total.backward()
+                optimizer.step()
+                '''
 
         # testing
         # in-domain
         print('in-domain one2one testing...')
         CLIP_adapter.inference_one2one(epoch, categories)
 
-        # print('in-domain one2all testing...')
-        # CLIP_adapter.inference_one2all(epoch, categories, test_categories, in_domain=True)
+        print('in-domain one2all testing...')
+        CLIP_adapter.inference_one2all(epoch, categories, test_categories, in_domain=True)
 
-        # # out-domain
-        # print('out-domain one2all testing...')
-        # CLIP_adapter.inference_one2all(epoch, categories, test_categories, in_domain=False)
+        # out-domain
+        print('out-domain one2all testing...')
+        CLIP_adapter.inference_one2all(epoch, categories, test_categories, in_domain=False)
 
         '''
         # ---------------------------------old-------------------------------------------
