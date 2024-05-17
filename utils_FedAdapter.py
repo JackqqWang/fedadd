@@ -186,7 +186,7 @@ def mutual_KD_loss(output1, output2, temperature=1):
     return mutual_info_loss
     
 
-def knowledge_distillation_loss(output_student, output_teacher, labels, temperature=1, alpha=0.5):
+def knowledge_distillation_loss(output_student, output_teacher, labels, temperature=1, alpha=0.9):
 
     # Soften the outputs
     soft_logits_student = log_softmax(output_student / temperature, dim=1)

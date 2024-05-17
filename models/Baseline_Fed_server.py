@@ -336,7 +336,7 @@ class Client_CLIP(object):
         train_loader = DataLoader(self.trainset, batch_size=self.args.batch_size, shuffle=True)
         test_loader = DataLoader(self.testset, batch_size=self.args.batch_size, shuffle=False)
         
-        optimizer = torch.optim.Adam(self.adapter.parameters(), lr=self.args.lr_CLIP)
+        optimizer = torch.optim.Adam(self.adapter.parameters(), lr=self.args.lr_local)
 
         for epoch in range(self.args.epoch):
             print(f"Epoch {epoch}:")
@@ -497,7 +497,7 @@ class Client_ViT(object):
         train_loader = DataLoader(self.trainset, batch_size=self.args.batch_size, shuffle=True)
         test_loader = DataLoader(self.testset, batch_size=self.args.batch_size, shuffle=False)
         
-        optimizer = torch.optim.Adam(self.image_classifier.parameters(), lr=self.args.lr_CLIP)
+        optimizer = torch.optim.Adam(self.image_classifier.parameters(), lr=self.args.lr_local)
 
         for epoch in range(self.args.epoch):
             print(f"Epoch {epoch}:")

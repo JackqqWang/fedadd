@@ -18,6 +18,7 @@ dataset_to_categories = {'officehome': ['Art', 'Clipart', 'Product', 'Real_World
 def main():
     
     args = arg_parser()
+    print(args.mode)
     set_seed(args.seed)
 
     # categories = dataset_to_categories[args.dataset]

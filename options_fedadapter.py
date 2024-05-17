@@ -27,7 +27,7 @@ def arg_parser():
     # parser.add_argument('--lr_KD', default=1e-4, type=float, help='learning rate for KD')
     parser.add_argument('--lr', default=1e-4, type=float, help='learning rate for end2end training')
     parser.add_argument('--temperature', default=1, type=float, help='temperature for KD')
-    # parser.add_argument('--alpha', default=0.5, type=float, help='alpha (weight for soft target loss) for KD')
+    parser.add_argument('--alpha', default=0.5, type=float, help='alpha (weight for soft target loss) for KD')
     # parser.add_argument('--beta', default=0.1, type=float, help='beta: weight for weighted sum of adapter outputs')
     parser.add_argument('--lam', default=0.1, type=float, help='lambda: weight for attention regularization')
     parser.add_argument('--eps', default=1e-5, type=float, help='eps: small value for numerical stability')
