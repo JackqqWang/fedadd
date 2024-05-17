@@ -6,6 +6,17 @@ def arg_parser():
     
     parser = argparse.ArgumentParser(description='CLIP on OfficeHome dataset')
     parser.add_argument('--model', default='ViT_B_32', type=str, help='pre_trained CLIP')
+#     CLIP_MODELS = {
+#     'RN50':'RN50',
+#     'RN101':'RN101',
+#     'RN50x4':'RN50x4',
+#     'RN50x16':'RN50x16',
+#     'RN50x64':'RN50x64',
+#     'ViT_B_32':'ViT-B/32',
+#     'ViT_B_16':'ViT-B/16',
+#     'ViT_L_14':'ViT-L/14',
+#     'ViT_L_14_336px':'ViT-L/14@336px'
+# }
     parser.add_argument('--device', type=str, default='cuda:0' if torch.cuda.is_available() else 'cpu')
     # parser.add_argument('--category', default='Art', type=str, help='category of OfficeHome dataset')
     parser.add_argument('--dataset', default='officehome', type=str, help='dataset')

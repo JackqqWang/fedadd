@@ -248,7 +248,7 @@ def main():
                         att_score.append(CLIP_adapter.MLP(server_logits_j))
 
                         # CE loss -- correct adapter
-                        if i == j:
+                        if i == j: 
                             loss_IL += CE_loss(server_logits_j, labels)
                     
                     server_logits_all = torch.stack(server_logits_all, dim=0)
@@ -391,8 +391,8 @@ def main():
     
     print("--------Finish Communication round {}--------".format(epoch))
 
-    for i, (acc, r) in enumerate(CLIP_adapter.best_acc):
-        print(f"Category {i} best accuracy: {acc} at round {r}")
+    # for i, (acc, r) in enumerate(CLIP_adapter.best_acc):
+    #     print(f"Category {i} best accuracy: {acc} at round {r}")
 
 
 if __name__ == "__main__":

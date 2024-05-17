@@ -90,8 +90,12 @@ def main():
         
     if args.mode == 'zero_shot':
         print('zero shot')
-        for i in range(len(categories)):
-            centralized_zero_shot(CLIP_adapter, i, args)
+        centralized_zero_shot(CLIP_adapter, args, categories, True)
+        centralized_zero_shot(CLIP_adapter, args, test_categories, False)
+        # for i in range(len(categories)):
+        #     centralized_zero_shot(CLIP_adapter, i, args)
+        # for i in range(len(test_categories)):
+        #     centralized_zero_shot(CLIP_adapter, i, args)
         
     else:
         print(f'train on {args.mode}')

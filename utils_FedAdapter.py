@@ -205,49 +205,58 @@ def knowledge_distillation_loss(output_student, output_teacher, labels, temperat
 
 
 # for centralized training
-def centralized_zero_shot(CLIP_adapter, i, args):
+def centralized_zero_shot(CLIP_adapter, args, categories, indomain=True):
 
-    test_loader = DataLoader(CLIP_adapter.testsets[i], batch_size=args.batch_size, shuffle=False)
+    if indomain:
+        testsets = CLIP_adapter.testsets
+        class_names = CLIP_adapter.class_names
+    else:
+        testsets = CLIP_adapter.testsets_out
+        class_names = CLIP_adapter.class_names_out
 
-    classes = CLIP_adapter.class_names[i]
+    for i in range(len(categories)):
 
-    total_correct = 0
-    total_images = 0
+        test_loader = DataLoader(testsets[i], batch_size=args.batch_size, shuffle=False)
 
-    with torch.no_grad(): 
-        for images, labels in tqdm(test_loader):
-            images = images.to(args.device)
-            labels = labels.to(args.device)
+        classes = class_names[i]
 
-            # prompts
-            text_descriptions = [f"This is a photo of a {class_name}" for class_name in classes]
-            text_tokens = clip.tokenize(text_descriptions).to(args.device)
+        total_correct = 0
+        total_images = 0
 
-            # # get logits
-            # logits_per_image, logits_per_text = CLIP_apt.clip_model(images, text_tokens)
-            # predictions = logits_per_image.softmax(dim=-1).argmax(dim=1)
-            
-            # Encode images 
-            image_features = CLIP_adapter.clip_model.encode_image(images)
-            image_features = image_features.to(dtype=torch.float32)
-            image_features /= image_features.norm(dim=-1, keepdim=True)            
+        with torch.no_grad(): 
+            for images, labels in tqdm(test_loader):
+                images = images.to(args.device)
+                labels = labels.to(args.device)
 
-            # Encode text 
-            text_features = CLIP_adapter.clip_model.encode_text(text_tokens)
-            text_features = text_features.to(dtype=torch.float32)
-            text_features /= text_features.norm(dim=-1, keepdim=True)
+                # prompts
+                text_descriptions = [f"This is a photo of a {class_name}" for class_name in classes]
+                text_tokens = clip.tokenize(text_descriptions).to(args.device)
 
-            # Calculate the similarity 
-            similarity = (100.0 * image_features @ text_features.T)
-            predictions = similarity.argmax(dim=1)  # logits per image
+                # # get logits
+                # logits_per_image, logits_per_text = CLIP_apt.clip_model(images, text_tokens)
+                # predictions = logits_per_image.softmax(dim=-1).argmax(dim=1)
+                
+                # Encode images 
+                image_features = CLIP_adapter.clip_model.encode_image(images)
+                image_features = image_features.to(dtype=torch.float32)
+                image_features /= image_features.norm(dim=-1, keepdim=True)            
 
-            # Update the total correct predictions and total images processed
-            total_correct += (predictions == labels).sum().item()
-            total_images += images.size(0)
+                # Encode text 
+                text_features = CLIP_adapter.clip_model.encode_text(text_tokens)
+                text_features = text_features.to(dtype=torch.float32)
+                text_features /= text_features.norm(dim=-1, keepdim=True)
 
-    # Calculate the accuracy
-    accuracy = total_correct / total_images
-    print(f"Test Accuracy: {accuracy:.2f}")
+                # Calculate the similarity 
+                similarity = (100.0 * image_features @ text_features.T)
+                predictions = similarity.argmax(dim=1)  # logits per image
+
+                # Update the total correct predictions and total images processed
+                total_correct += (predictions == labels).sum().item()
+                total_images += images.size(0)
+
+        # Calculate the accuracy
+        accuracy = total_correct / total_images
+        print(f"domain {categories[i]} Test Accuracy: {accuracy:.2f}")
 
     return accuracy
 

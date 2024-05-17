@@ -10,6 +10,7 @@ from tqdm import tqdm
 from itertools import chain
 from utils_FedAdapter import get_synthetic_dataset_server
 from torch.utils.data import Dataset, DataLoader
+import timm
 
 
 def get_image_features(image, model, cpreprocess, device='cuda', need_preprocess=False):
@@ -30,6 +31,7 @@ CLIP_MODELS = {
     'RN50x4':'RN50x4',
     'RN50x16':'RN50x16',
     'RN50x64':'RN50x64',
+    'ViT_S':'ViT-B/32',
     'ViT_B_32':'ViT-B/32',
     'ViT_B_16':'ViT-B/16',
     'ViT_L_14':'ViT-L/14',
@@ -95,9 +97,13 @@ class ClipModelatFed(object):
     # server side in FedAdapter
 
     def __init__(self, args, adp=True):
+
         self.clip_model, self.clip_preprocess = clip.load(
             CLIP_MODELS[args.model], device=args.device, jit=False)
         self.clip_model.eval()
+        if args.model == 'ViT_S':
+            self.clip_model.encode_image = timm.create_model('vit_tiny_patch16_224', pretrained=True, num_classes=512)
+
         self.args = args
         self.adp = adp
         self.device = args.device
