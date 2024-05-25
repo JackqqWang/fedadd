@@ -68,4 +68,4 @@ class Client(object):
             print(f"epoch {e}:")
             self.train(optimizer, train_loader)
             accuracy = self.test(test_loader)
-            print(f"Accuracy: {accuracy:.2f}")
+            print(f"Accuracy: {accuracy:.4f}")

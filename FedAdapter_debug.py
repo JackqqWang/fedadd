@@ -183,6 +183,10 @@ def main():
         for hook in hooks:
             hook.remove()
 
+
+        # copy client parameters
+        clients_copy = [cp.deepcopy(client) for client in clients]
+
         print("Start server update...")
         # server side (all are based on syn data)
         for _ in range(args.interact_epoch):
@@ -373,6 +377,11 @@ def main():
                 loss_total.backward()
                 optimizer.step()
                 '''
+
+        # momentum update on clients
+        for client, client_old in zip(clients, clients_copy):
+            for param, param_old in zip(client.image_classifier.parameters(), client_old.image_classifier.parameters()):
+                param.data = args.momentum * param_old.data + (1 - args.momentum) * param.data
 
         # testing
         # in-domain

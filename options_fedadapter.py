@@ -40,6 +40,7 @@ def arg_parser():
     parser.add_argument('--temperature', default=1, type=float, help='temperature for KD')
     parser.add_argument('--alpha', default=0.5, type=float, help='alpha (weight for soft target loss) for KD')
     # parser.add_argument('--beta', default=0.1, type=float, help='beta: weight for weighted sum of adapter outputs')
+    parser.add_argument('--momentum', default=0.9, type=float, help='coefficients for old client parameters')
     parser.add_argument('--lam', default=0.1, type=float, help='lambda: weight for attention regularization')
     parser.add_argument('--eps', default=1e-5, type=float, help='eps: small value for numerical stability')
     parser.add_argument('--optimizer', default='Adam', type=str, help='optimizer')

@@ -82,4 +82,4 @@ def evaluate(model, data_loader, processor, device):
     return accuracy
 
 accuracy = evaluate(model, test_loader, processor, device)
-print(f"Test Accuracy: {accuracy:.2f}%")
+print(f"Test Accuracy: {accuracy:.4f}%")

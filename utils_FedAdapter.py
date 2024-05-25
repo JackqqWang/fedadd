@@ -256,7 +256,7 @@ def centralized_zero_shot(CLIP_adapter, args, categories, indomain=True):
 
         # Calculate the accuracy
         accuracy = total_correct / total_images
-        print(f"domain {categories[i]} Test Accuracy: {accuracy:.2f}")
+        print(f"domain {categories[i]} Test Accuracy: {accuracy:.4f}")
 
     return accuracy
 
