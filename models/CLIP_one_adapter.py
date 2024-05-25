@@ -145,7 +145,7 @@ class ClipModelatFed(object):
 
         # Calculate the accuracy
         accuracy = total_correct / total_images
-        print(f"Test Accuracy: {accuracy:.2f}")
+        print(f"Test Accuracy: {accuracy:.4f}")
 
         return accuracy
 

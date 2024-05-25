@@ -268,7 +268,7 @@ class ClipModelatFed(object):
 
         # Calculate the accuracy
         accuracy = total_correct / total_images
-        print(f"Test Accuracy: {accuracy:.2f}")
+        print(f"Test Accuracy: {accuracy:.4f}")
 
         return accuracy
 
@@ -289,7 +289,10 @@ class ClipModelatFed(object):
             os.makedirs(model_path)
 
         if init:
-            model_path = os.path.join(model_path, f'adapter_epochs[{epochs}]_category[{category}].pth')
+            if self.args.model == 'ViT_B_32':
+                model_path = os.path.join(model_path, f'adapter_epochs[{epochs}]_category[{category}].pth')
+            else:
+                model_path = os.path.join(model_path, f'adapter[{self.args.model}]_epochs[{epochs}]_category[{category}].pth')
         else:
             model_path = os.path.join(model_path, f'adapter_FT_epochs[{epochs}]_category[{category}].pth')
 
